@@ -1,0 +1,50 @@
+================================================================================
+FLASH ATTENTION COMPATIBILITY CHECK
+================================================================================
+
+1. System Information:
+   PyTorch version: 2.5.1+cu124
+   CUDA version (PyTorch built with): 12.4
+   CUDNN version: 90100
+   GPU: Quadro RTX 8000
+   GPU Compute Capability: 7.5
+   GPU Memory: 47.5 GB
+
+2. GPU Architecture Analysis:
+   Quadro RTX 8000 is based on Turing architecture (compute capability 7.5)
+   Flash Attention requirements:
+   - Compute capability >= 7.0 (Volta) for Flash Attention v1
+   - Compute capability >= 8.0 (Ampere) for Flash Attention v2 optimal performance
+   Your GPU compute capability: 7.5
+
+3. Testing Scaled Dot Product Attention Kernels:
+
+   Testing FP16 (seq_len=4096):
+   ✗ Flash Attention: NOT AVAILABLE - No available kernel. Aborting execution.
+   ✓ Memory Efficient Attention: AVAILABLE
+   ✓ Math Attention: AVAILABLE
+
+   Testing BF16 (seq_len=4096):
+   ✗ Flash Attention: NOT AVAILABLE - No available kernel. Aborting execution.
+   ✗ Memory Efficient Attention: NOT AVAILABLE - No available kernel. Aborting execution.
+   ✓ Math Attention: AVAILABLE
+
+4. PyTorch Backend Query (for reference):
+   Note: These functions check if kernels CAN be built, not if they're optimal for your tensors
+   torch.backends.cuda.flash_sdp_enabled(): True
+   torch.backends.cuda.mem_efficient_sdp_enabled(): True
+   torch.backends.cuda.math_sdp_enabled(): True
+
+5. Specific Configuration Issues:
+   BF16 + Flash Attention on Turing (7.5):
+   - Flash Attention v1 has limited BF16 support on Turing
+   - BF16 is better supported on Ampere (8.0+) and newer
+   - Memory Efficient kernel may work better for BF16 on Turing
+
+6. Recommendations:
+   For Quadro RTX 8000 (Turing 7.5):
+   1. Use FP16 instead of BF16 for better Flash Attention support
+   2. Enable math kernel as fallback (enable_math=True)
+   3. Use Memory Efficient attention as alternative
+   4. Consider mixed settings based on sequence length
+================================================================================
