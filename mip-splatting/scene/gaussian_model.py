@@ -141,7 +141,7 @@ class GaussianModel:
 
     @torch.no_grad()
     def compute_3D_filter(self, cameras):
-        print("Computing 3D filter")
+        # print("Computing 3D filter")
         #TODO consider focal length and image width
         xyz = self.get_xyz
         distance = torch.ones((xyz.shape[0]), device=xyz.device) * 100000.0
