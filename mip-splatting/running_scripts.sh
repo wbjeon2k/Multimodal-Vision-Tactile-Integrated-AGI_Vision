@@ -1,9 +1,9 @@
 #!/bin/bash
 # File: run_all_trainings.sh
 
-BASE_DIR="/nfs4/jjlee/datasets/immertix/image_tex_relative_unlit"
+BASE_DIR="/nfs4/jjlee/datasets/immertix/images_relative_lit"
 RESULTS_DIR="results"
-CSV_FILE="training_metrics_all.csv"
+CSV_FILE="no_tactile_training_metrics_all.csv"
 
 
 echo "Starting all trainings in $BASE_DIR..."

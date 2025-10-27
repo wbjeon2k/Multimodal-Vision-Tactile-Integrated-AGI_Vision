@@ -17,13 +17,14 @@ import torch
 import random
 from random import randint
 from utils.loss_utils import l1_loss, ssim
+# from utils.image_utils import ssim #ssim_sklearn
 from gaussian_renderer import render, network_gui
 import sys
 from scene import Scene, GaussianModel
 from utils.general_utils import safe_state
 import uuid
 from tqdm import tqdm
-from utils.image_utils import psnr
+from utils.image_utils import psnr, ssim_sklearn, ssim_sklearn_v2
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
 import csv
@@ -133,6 +134,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             gt_image = create_offset_gt(gt_image, subpixel_offset)
 
         Ll1 = l1_loss(image, gt_image)
+        # sklearn_ssim = ssim_sklearn_v2(image.unsqueeze(0), gt_image.unsqueeze(0))
+        # print(f"SSIM sklearn: {sklearn_ssim.item()}, SSIM custom: {ssim(image.unsqueeze(0), gt_image.unsqueeze(0)).item()}")
+        # breakpoint()
+        # mask = torch.any(gt_image > 0.0, dim=0)
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
         loss.backward()
 
@@ -233,9 +238,17 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
                         tb_writer.add_images(config['name'] + "_view_{}/render".format(viewpoint.image_name), image[None], global_step=iteration)
                         if iteration == testing_iterations[0]:
                             tb_writer.add_images(config['name'] + "_view_{}/ground_truth".format(viewpoint.image_name), gt_image[None], global_step=iteration)
+                            
+                    mask = torch.any(gt_image > 0.0, dim=0)
+                    image = image.unsqueeze(0)       # (C, H, W) -> (1, C, H, W)
+                    gt_image = gt_image.unsqueeze(0) # (C, H, W) -> (1, C, H, W)
+                    
+                    if mask.dim() == 2:
+                        mask = mask.unsqueeze(0) # (H, W) -> (1, H, W)
+                        
                     l1_test += l1_loss(image, gt_image).mean().double()
-                    psnr_test += psnr(image, gt_image).mean().double()
-                    ssim_test += ssim(image, gt_image).mean().double()
+                    psnr_test += psnr(image, gt_image, mask).mean().double()
+                    ssim_test += ssim_sklearn(image, gt_image, mask).mean().double()
                 psnr_test /= len(config['cameras'])
                 l1_test /= len(config['cameras'])   
                 ssim_test /= len(config['cameras'])   
