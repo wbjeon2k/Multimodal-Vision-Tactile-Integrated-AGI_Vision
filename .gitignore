@@ -225,3 +225,4 @@ __marimo__/
 
 results/
 *.csv
+ply_list*

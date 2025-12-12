@@ -16,7 +16,7 @@ import cv2
 import torch
 import random
 from random import randint
-from utils.loss_utils import l1_loss, ssim
+from utils.loss_utils import * #l1_loss, ssim
 # from utils.image_utils import ssim #ssim_sklearn
 from gaussian_renderer import render, network_gui
 import sys
@@ -24,7 +24,7 @@ from scene import Scene, GaussianModel
 from utils.general_utils import safe_state
 import uuid
 from tqdm import tqdm
-from utils.image_utils import psnr, ssim_sklearn, ssim_sklearn_v2
+from utils.image_utils import * #psnr, ssim_sklearn
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
 import csv
@@ -79,7 +79,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
     viewpoint_stack = None
     ema_loss_for_log = 0.0
-    progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
+    # progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
     for iteration in range(first_iter, opt.iterations + 1):        
         if network_gui.conn == None:
@@ -129,16 +129,19 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
-        # sample gt_image with subpixel offset
         if dataset.resample_gt_image:
             gt_image = create_offset_gt(gt_image, subpixel_offset)
 
-        Ll1 = l1_loss(image, gt_image)
-        # sklearn_ssim = ssim_sklearn_v2(image.unsqueeze(0), gt_image.unsqueeze(0))
-        # print(f"SSIM sklearn: {sklearn_ssim.item()}, SSIM custom: {ssim(image.unsqueeze(0), gt_image.unsqueeze(0)).item()}")
-        # breakpoint()
         # mask = torch.any(gt_image > 0.0, dim=0)
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+        # image = image.unsqueeze(0)       # (C, H, W) -> (1, C, H, W)
+        # gt_image = gt_image.unsqueeze(0) # (C, H, W) -> (1, C, H, W)
+        
+        # if mask.dim() == 2:
+        #     mask = mask.unsqueeze(0) # (H, W) -> (1, H, W)
+        
+        Ll1 = l1_loss(image, gt_image)
+        ssim_metric = ssim_v2(image, gt_image)
+        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim_metric)
         loss.backward()
 
         iter_end.record()
@@ -146,11 +149,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         with torch.no_grad():
             # Progress bar
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
-            if iteration % 10 == 0:
-                progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{4}f}"})
-                progress_bar.update(10)
-            if iteration == opt.iterations:
-                progress_bar.close()
+            # if iteration % 10 == 0:
+            #     progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{4}f}"})
+            #     progress_bar.update(10)
+            # if iteration == opt.iterations:
+            #     progress_bar.close()
 
             # Log and save
             overall_psnr, overall_l1, overall_ssim = training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background, dataset.kernel_size))
@@ -223,7 +226,7 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
     # Report test and samples of training set
     if iteration in testing_iterations:
         torch.cuda.empty_cache()
-        validation_configs = ({'name': 'test', 'cameras' : scene.getTestCameras()}, 
+        validation_configs = ({'name': 'test', 'cameras' : scene.getTestCameras()},
                               {'name': 'train', 'cameras' : [scene.getTrainCameras()[idx % len(scene.getTrainCameras())] for idx in range(5, 30, 5)]})
 
         for config in validation_configs:
@@ -239,16 +242,22 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
                         if iteration == testing_iterations[0]:
                             tb_writer.add_images(config['name'] + "_view_{}/ground_truth".format(viewpoint.image_name), gt_image[None], global_step=iteration)
                             
-                    mask = torch.any(gt_image > 0.0, dim=0)
-                    image = image.unsqueeze(0)       # (C, H, W) -> (1, C, H, W)
-                    gt_image = gt_image.unsqueeze(0) # (C, H, W) -> (1, C, H, W)
                     
-                    if mask.dim() == 2:
-                        mask = mask.unsqueeze(0) # (H, W) -> (1, H, W)
-                        
                     l1_test += l1_loss(image, gt_image).mean().double()
-                    psnr_test += psnr(image, gt_image, mask).mean().double()
-                    ssim_test += ssim_sklearn(image, gt_image, mask).mean().double()
+                    psnr_test += psnr_v2(image, gt_image).mean().double()
+                    ssim_test += ssim_v2(image, gt_image).mean().double()
+                    
+                    # mask = torch.any(gt_image > 0.0, dim=0)
+                    # image = image.unsqueeze(0)       # (C, H, W) -> (1, C, H, W)
+                    # gt_image = gt_image.unsqueeze(0) # (C, H, W) -> (1, C, H, W)
+                    
+                    # if mask.dim() == 2:
+                    #     mask = mask.unsqueeze(0) # (H, W) -> (1, H, W)
+                        
+                    # l1_test += l1_loss(image, gt_image).mean().double()
+                    # psnr_test += psnr(image, gt_image, mask).mean().double()
+                    # ssim_test += ssim(image, gt_image, mask).mean().double()
+                    
                 psnr_test /= len(config['cameras'])
                 l1_test /= len(config['cameras'])   
                 ssim_test /= len(config['cameras'])   
@@ -277,14 +286,15 @@ if __name__ == "__main__":
     op = OptimizationParams(parser)
     pp = PipelineParams(parser)
     parser.add_argument('--ip', type=str, default="127.0.0.1")
-    parser.add_argument('--port', type=int, default=6009)
+    parser.add_argument('--port', type=int, default=1234)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[4_000])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[4_000])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[4_000, 6_000, 15_000, 30_000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[4_000, 6_000, 15_000, 30_000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
+    parser.add_argument("--csv_name", type=str, default="no_training_metrics_all.csv")
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
     
@@ -294,15 +304,15 @@ if __name__ == "__main__":
     safe_state(args.quiet)
 
     # Start GUI server, configure and run training
-    network_gui.init(args.ip, args.port)
-    torch.autograd.set_detect_anomaly(args.detect_anomaly)
+    # network_gui.init(args.ip, args.port)
+    # torch.autograd.set_detect_anomaly(args.detect_anomaly)
     overall_psnr, overall_l1, overall_sim = training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
 
     # Save the overall metrics to a CSV file
-    csv_file_path = "training_metrics_all.csv"
-    file_exists = os.path.isfile(csv_file_path)
+    # csv_file_path = "no_training_metrics_all.csv"
+    file_exists = os.path.isfile(args.csv_name)
 
-    with open(csv_file_path, mode='a', newline='') as csv_file:
+    with open(args.csv_name, mode='a', newline='') as csv_file:
         csv_writer = csv.writer(csv_file)
         # Write header only once
         if not file_exists:
@@ -310,4 +320,4 @@ if __name__ == "__main__":
 
         csv_writer.writerow([os.path.basename(args.model_path), overall_psnr, overall_l1, overall_sim])
 
-    print(f"Appended metrics for {args.model_path} to {csv_file_path}")
+    print(f"Appended metrics for {args.model_path} to {args.csv_name}")

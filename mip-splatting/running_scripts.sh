@@ -1,9 +1,9 @@
 #!/bin/bash
 # File: run_all_trainings.sh
 
-BASE_DIR="/nfs4/jjlee/datasets/immertix/images_relative_lit"
+BASE_DIR="/nfs4/jjlee/datasets/immertix/images_relative_lit" #"/nfs4/jjlee/datasets/immertix/images_tex_relative_lit"
 RESULTS_DIR="results"
-CSV_FILE="no_tactile_training_metrics_all.csv"
+CSV_FILE="without_tactile_objects.csv"
 
 
 echo "Starting all trainings in $BASE_DIR..."
@@ -29,12 +29,12 @@ for subdir in "$BASE_DIR"/*; do
     echo "Starting training for dataset: $name"
     echo "========================================================"
 
-    python train.py -s "$subdir" -m "$model_path" --eval
+    python train.py -s "$subdir" -m "$model_path" --eval --csv_name "$CSV_FILE"
 
     echo "Training for $name completed."
     echo
 done
-
+    
 echo "========================================================"
 echo "All trainings completed. Results saved to $CSV_FILE"
 echo "========================================================"

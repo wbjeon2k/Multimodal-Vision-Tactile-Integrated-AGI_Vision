@@ -19,7 +19,7 @@ from utils.loss_utils import ssim
 import lpips
 import json
 from tqdm import tqdm
-from utils.image_utils import psnr
+from utils.image_utils import psnr_v2
 from argparse import ArgumentParser
 
 def readImages(renders_dir, gt_dir):
@@ -72,7 +72,7 @@ def evaluate(model_paths, scale):
 
                 for idx in tqdm(range(len(renders)), desc="Metric evaluation progress"):
                     ssims.append(ssim(renders[idx], gts[idx]))
-                    psnrs.append(psnr(renders[idx], gts[idx]))
+                    psnrs.append(psnr_v2(renders[idx], gts[idx]))
                     lpipss.append(lpips_fn(renders[idx], gts[idx]).detach())
 
                 print("  SSIM : {:>12.7f}".format(torch.tensor(ssims).mean(), ".5"))
