@@ -226,3 +226,17 @@ __marimo__/
 results/
 *.csv
 ply_list*
+
+sam/.vscode/
+sam/.DS_Store
+sam/__pycache__/
+sam/*-checkpoint.ipynb
+sam/.venv
+sam/*.egg*
+sam/build/*
+sam/_C.*
+sam/outputs/*
+# sam/checkpoints/*.pt
+sam/demo/backend/checkpoints/*.pt
+
+*.pt

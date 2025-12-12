@@ -7,7 +7,8 @@ Developing AGI technologies that integrate tactile and visual information to sim
 ### Updates
 - 2025.12.12
     - `develop_3dgs` branch를 `master (main)` branch로 merge
-    - 각 2D-3D Object Reconstruction 방법 별로 folder 생성해둠 (NeRF, 3DGS, Diffusion-based)
+    - Segment Anything Model (SAM) 관련 folder 생성 및 segmentation baseline 구축
+    - 각 2D-3D Object Reconstruction 방법 별로 folder 생성 (NeRF, 3DGS, Diffusion-based)
 - 2025.10.24
     - `develop_3dgs` branch 생성 및 3DGS baseline 따로 구축
     - 3DGS 성능 재현 확인 $\rightarrow$ NeRF Synthetic Datasets 기준 `SSIM Score: 0.94`
