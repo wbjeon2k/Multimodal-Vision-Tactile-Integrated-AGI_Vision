@@ -65,16 +65,17 @@ def ssim_sklearn(img1, img2, mask):
     
     return torch.tensor(ssim_scores, device=img1.device, dtype=img1.dtype).reshape(img1.shape[0], -1)
 
-def ssim_sklearn_v2(img1, img2):
+# def ssim_sklearn_v2(img1, img2):
+    
+#     ssim = SSIM(img1.permute(0, 2, 3, 1).detach().cpu().numpy()[0], img2.permute(0, 2, 3, 1).detach().cpu().numpy()[0], data_range=1.0, channel_axis=2, full=True)[1]
+#     return torch.tensor(ssim).reshape(img1.shape[0], -1).mean()
+
+
+def psnr_v2(img1, img2):
+    mse = (((img1 - img2)) ** 2).reshape(img1.shape[0], -1).mean(1, keepdim=True)
+    return 20 * torch.log10(1.0 / torch.sqrt(mse))
+
+def ssim_sklearn(img1, img2):
     
     ssim = SSIM(img1.permute(0, 2, 3, 1).detach().cpu().numpy()[0], img2.permute(0, 2, 3, 1).detach().cpu().numpy()[0], data_range=1.0, channel_axis=2, full=True)[1]
     return torch.tensor(ssim).reshape(img1.shape[0], -1).mean()
-
-
-
-# def mse(img1, img2):
-#     return (((img1 - img2)) ** 2).reshape(img1.shape[0], -1).mean(1, keepdim=True)
-
-# def psnr(img1, img2):
-#     mse = (((img1 - img2)) ** 2).reshape(img1.shape[0], -1).mean(1, keepdim=True)
-#     return 20 * torch.log10(1.0 / torch.sqrt(mse))
