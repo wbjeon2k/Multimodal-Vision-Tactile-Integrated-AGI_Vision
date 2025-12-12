@@ -4,6 +4,17 @@
 
 Developing AGI technologies that integrate tactile and visual information to simulate human-level haptic perception and generate immersive virtual haptic content
 
+### Updates
+- 2025.12.12
+    - `develop_3dgs` branch를 `master (main)` branch로 merge
+    - 각 2D-3D Object Reconstruction 방법 별로 folder 생성해둠 (NeRF, 3DGS, Diffusion-based)
+- 2025.10.24
+    - `develop_3dgs` branch 생성 및 3DGS baseline 따로 구축
+    - 3DGS 성능 재현 확인 $\rightarrow$ NeRF Synthetic Datasets 기준 `SSIM Score: 0.94`
+- 2025.09.29
+    - 시촉각 AGI 과제 github repository 생성
+    - README.md 정리
+
 ### Directory Layout
 - `unityassets` : Unity 3D object 제작에 사용된 코드 저장용.
     - 용량이 큰 3D asset들을 직접 업로드 하지 않도록 주의 부탁드립니다.
@@ -20,3 +31,5 @@ Developing AGI technologies that integrate tactile and visual information to sim
     - `master` branch는 어느 정도 진행된 작업물을 업데이트 하는 곳입니다.
     - 반드시 모든 사람들이 공유 해야하는 내용들을 `master` branch에 push 해주세요.
     - 작업 별 branch 생성 --> 자유롭게 해당 branch push --> 최종 업데이트시 `master` 에 pull request
+
+
