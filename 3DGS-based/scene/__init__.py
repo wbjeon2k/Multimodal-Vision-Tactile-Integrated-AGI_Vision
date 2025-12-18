@@ -1,13 +1,3 @@
-#
-# Copyright (C) 2023, Inria
-# GRAPHDECO research group, https://team.inria.fr/graphdeco
-# All rights reserved.
-#
-# This software is free for non-commercial, research and evaluation use 
-# under the terms of the LICENSE.md file.
-#
-# For inquiries contact  george.drettakis@inria.fr
-#
 
 import os
 import random
@@ -17,7 +7,48 @@ from scene.dataset_readers import sceneLoadTypeCallbacks
 from scene.gaussian_model import GaussianModel
 from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
+import torch 
 
+def save_tactile_colored_ply(gaussian_model, path):
+    print(f"[Tactile Save] Saving colored PLY to: {path}")
+    SH_C0 = 0.28209479177387814
+    with torch.no_grad():
+        backup_dc = gaussian_model._features_dc.clone()
+        backup_rest = gaussian_model._features_rest.clone()
+        
+        original_rgb = (backup_dc.squeeze(1) * SH_C0) + 0.5
+        original_rgb = torch.clamp(original_rgb, 0.0, 1.0)
+
+        if hasattr(gaussian_model, "tactile_features"):
+            feat_val = gaussian_model.tactile_features[:, 0:1]
+            feat_val = torch.clamp(feat_val, 0.0, 1.0)
+            
+            # color_sky = torch.tensor([0.53, 0.81, 0.92], device="cuda")
+            # color_warm_red = torch.tensor([1.0, 0.39, 0.28], device="cuda")
+            
+            # is_rough = (feat_val < 0.5).float()
+            # tactile_rgb = is_rough * color_warm_red + (1.0 - is_rough) * color_sky
+            color_flat_green = torch.tensor([0.36, 0.78, 0.39], device="cuda")
+            is_flat = (feat_val > 0.5).float()
+            tactile_rgb = is_flat * color_flat_green + (1.0 - is_flat) * original_rgb
+            
+        else:
+            print("[Warning] No tactile_features found. Saving as black.")
+            tactile_rgb = torch.zeros_like(gaussian_model._features_dc[:, 0, :])
+
+        tactile_sh_dc = (tactile_rgb - 0.5) / 0.28209479177387814
+        
+        gaussian_model._features_dc.data = tactile_sh_dc.unsqueeze(1)
+        gaussian_model._features_rest.data.fill_(0.0)
+
+        gaussian_model.save_ply(path)
+
+        gaussian_model._features_dc.data = backup_dc
+        gaussian_model._features_rest.data = backup_rest
+
+    print("[Tactile Save] Done.")
+    
+    
 class Scene:
 
     gaussians : GaussianModel
@@ -87,7 +118,11 @@ class Scene:
 
     def save(self, iteration):
         point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
+        os.makedirs(point_cloud_path, exist_ok=True) # 폴더가 없으면 생성
+
         self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
+        tactile_ply_path = os.path.join(point_cloud_path, "tactile_color.ply")
+        save_tactile_colored_ply(self.gaussians, tactile_ply_path)
 
     def getTrainCameras(self, scale=1.0):
         return self.train_cameras[scale]

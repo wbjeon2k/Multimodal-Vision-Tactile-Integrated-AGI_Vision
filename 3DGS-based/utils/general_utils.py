@@ -1,15 +1,5 @@
-#
-# Copyright (C) 2023, Inria
-# GRAPHDECO research group, https://team.inria.fr/graphdeco
-# All rights reserved.
-#
-# This software is free for non-commercial, research and evaluation use 
-# under the terms of the LICENSE.md file.
-#
-# For inquiries contact  george.drettakis@inria.fr
-#
-
 import torch
+import torch.nn as nn
 import sys
 from datetime import datetime
 import numpy as np
@@ -131,3 +121,37 @@ def safe_state(silent):
     np.random.seed(0)
     torch.manual_seed(0)
     torch.cuda.set_device(torch.device("cuda:0"))
+
+
+def setup_tactile_field(gaussian_model, optimizer):
+    num_points = gaussian_model.get_xyz.shape[0]
+    initial_features = torch.ones((num_points, 3), device="cuda") * 0.5
+    
+    gaussian_model.tactile_features = nn.Parameter(initial_features.requires_grad_(True))
+    
+    l = [{'params': [gaussian_model.tactile_features], 'lr': 0.0005, "name": "tactile"}]
+    optimizer.add_param_group(l[0])
+    print(f"[Tactile] Initialized features for {num_points} points.")
+
+def sync_tactile_features(gaussian_model, optimizer):
+    current_xyz_num = gaussian_model.get_xyz.shape[0]
+    
+    if not hasattr(gaussian_model, "tactile_features"):
+        return
+
+    current_feat_num = gaussian_model.tactile_features.shape[0]
+    
+    if current_xyz_num != current_feat_num:
+        old_features = gaussian_model.tactile_features.data
+        new_features = torch.ones((current_xyz_num, 3), device="cuda") * 0.5
+        
+        min_num = min(current_xyz_num, current_feat_num)
+        new_features[:min_num] = old_features[:min_num]
+        
+        gaussian_model.tactile_features = nn.Parameter(new_features.requires_grad_(True))
+        
+        for param_group in optimizer.param_groups:
+            if param_group["name"] == "tactile":
+                param_group["params"][0] = gaussian_model.tactile_features
+                break
+        

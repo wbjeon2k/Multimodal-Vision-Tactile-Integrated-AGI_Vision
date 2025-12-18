@@ -240,3 +240,4 @@ sam/outputs/*
 sam/demo/backend/checkpoints/*.pt
 
 *.pt
+*.sh

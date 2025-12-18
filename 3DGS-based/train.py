@@ -1,33 +1,23 @@
-#
-# Copyright (C) 2023, Inria
-# GRAPHDECO research group, https://team.inria.fr/graphdeco
-# All rights reserved.
-#
-# This software is free for non-commercial, research and evaluation use 
-# under the terms of the LICENSE.md file.
-#
-# For inquiries contact  george.drettakis@inria.fr
-#
-
+# 1. 표준 라이브러리 (Standard Libraries)
 import os
-import numpy as np
-import open3d as o3d
-import cv2
-import torch
+import sys
+import uuid
 import random
 from random import randint
-from utils.loss_utils import * #l1_loss, ssim
-# from utils.image_utils import ssim #ssim_sklearn
-from gaussian_renderer import render, network_gui
-import sys
-from scene import Scene, GaussianModel
-from utils.general_utils import safe_state
-import uuid
-from tqdm import tqdm
-from utils.image_utils import * #psnr, ssim_sklearn
 from argparse import ArgumentParser, Namespace
+
+import numpy as np
+import torch
+import open3d as o3d
+from tqdm import tqdm
+
 from arguments import ModelParams, PipelineParams, OptimizationParams
-import csv
+from gaussian_renderer import render, network_gui
+from scene import Scene, GaussianModel
+from utils.general_utils import *
+from utils.image_utils import *
+from utils.loss_utils import *
+
 try:
     from torch.utils.tensorboard import SummaryWriter
     TENSORBOARD_FOUND = True
@@ -54,7 +44,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians)
+    
     gaussians.training_setup(opt)
+    setup_tactile_field(gaussians, gaussians.optimizer)
+
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
@@ -66,10 +59,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     iter_end = torch.cuda.Event(enable_timing = True)
 
     trainCameras = scene.getTrainCameras().copy()
-    testCameras = scene.getTestCameras().copy()
-    allCameras = trainCameras + testCameras
     
-    # highresolution index
     highresolution_index = []
     for index, camera in enumerate(trainCameras):
         if camera.image_width >= 800:
@@ -79,8 +69,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
     viewpoint_stack = None
     ema_loss_for_log = 0.0
-    # progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
+    progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
+    
     for iteration in range(first_iter, opt.iterations + 1):        
         if network_gui.conn == None:
             network_gui.try_connect()
@@ -98,64 +89,93 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 network_gui.conn = None
 
         iter_start.record()
-
         gaussians.update_learning_rate(iteration)
 
-        # Every 1000 its we increase the levels of SH up to a maximum degree
         if iteration % 1000 == 0:
             gaussians.oneupSHdegree()
 
-        # Pick a random Camera
         if not viewpoint_stack:
             viewpoint_stack = scene.getTrainCameras().copy()
         viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
         
-        # Pick a random high resolution camera
         if random.random() < 0.3 and dataset.sample_more_highres:
             viewpoint_cam = trainCameras[highresolution_index[randint(0, len(highresolution_index)-1)]]
             
-        # Render
         if (iteration - 1) == debug_from:
             pipe.debug = True
 
-        #TODO ignore border pixels
         if dataset.ray_jitter:
             subpixel_offset = torch.rand((int(viewpoint_cam.image_height), int(viewpoint_cam.image_width), 2), dtype=torch.float32, device="cuda") - 0.5
-            # subpixel_offset *= 0.0
         else:
             subpixel_offset = None
+            
         render_pkg = render(viewpoint_cam, gaussians, pipe, background, kernel_size=dataset.kernel_size, subpixel_offset=subpixel_offset)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
-        # Loss
         gt_image = viewpoint_cam.original_image.cuda()
         if dataset.resample_gt_image:
             gt_image = create_offset_gt(gt_image, subpixel_offset)
 
-        # mask = torch.any(gt_image > 0.0, dim=0)
-        # image = image.unsqueeze(0)       # (C, H, W) -> (1, C, H, W)
-        # gt_image = gt_image.unsqueeze(0) # (C, H, W) -> (1, C, H, W)
-        
-        # if mask.dim() == 2:
-        #     mask = mask.unsqueeze(0) # (H, W) -> (1, H, W)
-        
         Ll1 = l1_loss(image, gt_image)
         ssim_metric = ssim_v2(image, gt_image)
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim_metric)
         loss.backward()
 
+        sync_tactile_features(gaussians, gaussians.optimizer)
+        
+        img_name = viewpoint_cam.image_name
+        folder_path = 'elev45' if int(img_name[4:]) >= 250 else 'elevm25'
+        mask_filename = img_name.replace("img", "mask") + ".npy"
+        
+        mask_path = os.path.join(dataset.source_path, folder_path, "masking", mask_filename)
+        
+        loss_tactile = 0.0
+        
+        mask_np = np.load(mask_path)
+        target_tactile = torch.from_numpy(mask_np).float().cuda()
+        
+        # 차원 및 해상도 맞추기
+        if len(target_tactile.shape) == 3:
+            target_tactile = target_tactile.squeeze(-1)
+        
+        render_h = viewpoint_cam.image_height
+        render_w = viewpoint_cam.image_width
+        
+        if (target_tactile.shape[0] != render_h) or (target_tactile.shape[1] != render_w):
+            target_tactile = target_tactile.unsqueeze(0).unsqueeze(0)
+            target_tactile = F.interpolate(target_tactile, size=(render_h, render_w), mode='nearest')
+            target_tactile = target_tactile.squeeze() # (H, W)
+
+        gt_rgb = viewpoint_cam.original_image.cuda() # (3, H, W)
+        obj_mask = (gt_rgb.sum(dim=0) > 0.05).float() # (H, W)
+
+        render_pkg_pred = render(
+            viewpoint_cam, 
+            gaussians, 
+            pipe, 
+            background, 
+            kernel_size=dataset.kernel_size, 
+            override_color=gaussians.tactile_features 
+        )
+        pred_tactile = render_pkg_pred["render"][0] # R채널만 사용 (H, W)
+        loss_tactile = F.l1_loss(pred_tactile * obj_mask, target_tactile * obj_mask)
+        
+        (loss_tactile).backward()
+        
         iter_end.record()
 
         with torch.no_grad():
-            # Progress bar
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
-            # if iteration % 10 == 0:
-            #     progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{4}f}"})
-            #     progress_bar.update(10)
-            # if iteration == opt.iterations:
-            #     progress_bar.close()
+            if iteration % 10 == 0:
+                progress_bar.set_postfix({
+                    "Loss": f"{ema_loss_for_log:.{4}f}",
+                    "TacLoss": f"{loss_tactile.item():.{4}f}",
+                })
+                progress_bar.update(10)
+                
+            if iteration == opt.iterations:
+                progress_bar.close()
 
-            # Log and save
             overall_psnr, overall_l1, overall_ssim = training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background, dataset.kernel_size))
             if (iteration in saving_iterations):
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
@@ -163,7 +183,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
             # Densification
             if iteration < opt.densify_until_iter:
-                # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
                 gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
 
@@ -177,10 +196,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
             if iteration % 100 == 0 and iteration > opt.densify_until_iter:
                 if iteration < opt.iterations - 100:
-                    # don't update in the end of training
                     gaussians.compute_3D_filter(cameras=trainCameras)
-        
-            # Optimizer step
             if iteration < opt.iterations:
                 gaussians.optimizer.step()
                 gaussians.optimizer.zero_grad(set_to_none = True)
@@ -242,21 +258,9 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
                         if iteration == testing_iterations[0]:
                             tb_writer.add_images(config['name'] + "_view_{}/ground_truth".format(viewpoint.image_name), gt_image[None], global_step=iteration)
                             
-                    
                     l1_test += l1_loss(image, gt_image).mean().double()
                     psnr_test += psnr_v2(image, gt_image).mean().double()
                     ssim_test += ssim_v2(image, gt_image).mean().double()
-                    
-                    # mask = torch.any(gt_image > 0.0, dim=0)
-                    # image = image.unsqueeze(0)       # (C, H, W) -> (1, C, H, W)
-                    # gt_image = gt_image.unsqueeze(0) # (C, H, W) -> (1, C, H, W)
-                    
-                    # if mask.dim() == 2:
-                    #     mask = mask.unsqueeze(0) # (H, W) -> (1, H, W)
-                        
-                    # l1_test += l1_loss(image, gt_image).mean().double()
-                    # psnr_test += psnr(image, gt_image, mask).mean().double()
-                    # ssim_test += ssim(image, gt_image, mask).mean().double()
                     
                 psnr_test /= len(config['cameras'])
                 l1_test /= len(config['cameras'])   
@@ -300,24 +304,5 @@ if __name__ == "__main__":
     
     print("Optimizing " + args.model_path)
 
-    # Initialize system state (RNG)
     safe_state(args.quiet)
-
-    # Start GUI server, configure and run training
-    # network_gui.init(args.ip, args.port)
-    # torch.autograd.set_detect_anomaly(args.detect_anomaly)
     overall_psnr, overall_l1, overall_sim = training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
-
-    # Save the overall metrics to a CSV file
-    # csv_file_path = "no_training_metrics_all.csv"
-    file_exists = os.path.isfile(args.csv_name)
-
-    with open(args.csv_name, mode='a', newline='') as csv_file:
-        csv_writer = csv.writer(csv_file)
-        # Write header only once
-        if not file_exists:
-            csv_writer.writerow(["Model", "Overall PSNR", "Overall L1 Loss", "Overall SSIM"])
-
-        csv_writer.writerow([os.path.basename(args.model_path), overall_psnr, overall_l1, overall_sim])
-
-    print(f"Appended metrics for {args.model_path} to {args.csv_name}")
